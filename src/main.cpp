@@ -1,34 +1,73 @@
+#include <stdio.h>
+#include <ArduinoJson.h>
 #include <Arduino.h>
+
+#include "credentials.h"
+
+#include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <WiFiUdp.h>
-#include "credentials.h"
 #include "ESP8266HTTPClient.h"
-#include <ArduinoJson.h>
+
+#define HTTP_REST_PORT 80
+#define WIFI_RETRY_DELAY 500
+#define MAX_WIFI_INIT_RETRY 50
+
+IPAddress staticIP(192, 168, 63, 122);
+IPAddress gateway(192, 168, 63, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dns(192, 168, 63, 21);
+IPAddress dnsGoogle(8, 8, 8, 8);
+String hostName = "serre01";
+
+ESP8266WebServer httpRestServer(HTTP_REST_PORT);
+
+WiFiUDP ntpUDP;
 
 #define ONE_WIRE_BUS 2
 #define RELAY_BUS 0
+#define PROCESSING_DELAY 5000
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-float tempSensor1;
+float tempSensor1 = 0;
 boolean goingUp = false;
 int deviceCount = 0;
-String statusStr = "";
+String statusStr = " nothing ";
+String settingStr = " empty ";
 uint8_t sensor1[8];
 
 //Settings from webserver
 float minTemp;
 float maxTemp;
-const char* currentTime;
+const char *currentTime;
 boolean shouldSleep;
 
 DeviceAddress Thermometer;
 
-ESP8266WebServer server(80);
+int init_wifi()
+{
+  int retries = 0;
 
-WiFiUDP ntpUDP;
+  Serial.println("Connecting to WiFi");
+
+  WiFi.config(staticIP, gateway, subnet, dns, dnsGoogle);
+  WiFi.mode(WIFI_STA);
+  //WiFi.hostname(hostName);
+  WiFi.begin(ssid, password);
+
+  while ((WiFi.status() != WL_CONNECTED) && (retries < MAX_WIFI_INIT_RETRY))
+  {
+    retries++;
+    delay(WIFI_RETRY_DELAY);
+    Serial.print("#");
+  }
+  Serial.println();
+  return WiFi.status();
+}
 
 void printAddress(DeviceAddress deviceAddress)
 {
@@ -46,12 +85,12 @@ void printAddress(DeviceAddress deviceAddress)
 
 void handle_NotFound()
 {
-  server.send(404, "text/plain", "Not found");
+  httpRestServer.send(404, "text/plain", "Not found");
 }
 
 void handle_OnConnect()
 {
-  //server.send(200, "text/html", SendHTML());
+  //httpRestServer.send(200, "text/html", SendHTML());
 }
 
 String SendHTML()
@@ -70,7 +109,7 @@ String SendHTML()
   ptr += ".side-by-side{display: table-cell;vertical-align: middle;position: relative;}";
   ptr += ".text{font-weight: 600;font-size: 19px;width: 200px;}";
   ptr += ".temperature{font-weight: 300;font-size: 50px;padding-right: 15px;}";
-  ptr += ".Sensor1 .temperature{color: #3B97D3;}";
+  ptr += ".Sensor1 .Settings1 .temperature{color: #3B97D3;}";
   ptr += ".superscript{font-size: 17px;font-weight: 600;position: absolute;right: -5px;top: 15px;}";
   ptr += ".data{padding: 10px;}";
   ptr += ".container{display: table;margin: 0 auto;}";
@@ -106,9 +145,15 @@ String SendHTML()
 
   ptr += "<div class='data Sensor1'>";
   ptr += "<div class='side-by-side text'>Status</div>";
-  ptr += "<div class='side-by-side text'>" + statusStr + "</div>";
+  ptr += "<div class='side-by-side text'>" + statusStr + "<br /><br />" + settingStr + "</div>";
   ptr += "</div>";
   ptr += "</div>";
+
+  // ptr += "<div class='data Settings1'>";
+  // ptr += "<div class='side-by-side text'>Settings1</div>";
+  // ptr += "<div class='side-by-side text'>" + settingStr + "</div>";
+  // ptr += "</div>";
+  // ptr += "</div>";
 
   ptr += "</body>";
   ptr += "</html>";
@@ -117,71 +162,100 @@ String SendHTML()
 
 void charToStringL(const char S[], String &D)
 {
-    byte at = 0;
-    const char *p = S;
-    D = "";
+  byte at = 0;
+  const char *p = S;
+  D = "";
 
-    while (*p++) {
-      D.concat(S[at++]);
-      }
+  while (*p++)
+  {
+    D.concat(S[at++]);
+  }
 }
 
 void charToString(char S[], String &D)
 {
- String rc(S);
- D = rc;
+  String rc(S);
+  D = rc;
 }
 
 boolean GetProperties(String currentTemp)
 {
   HTTPClient http;
-
-  http.begin("http://maiden.pagekite.me/MelektroApi/getsettings/?statusStr="+currentTemp);
-  http.addHeader("Content-Type", "text/plain;charset=UTF-8");
-  int httpResponseCode = http.POST("");
-
+  
+  //http.begin("http://maiden.pagekite.me/MelektroApi/getsettings/?statusStr="+currentTemp);
+  http.begin("http://pastei01.local:8080/MelektroApi/getsettings/?statusStr=" + currentTemp);
+  //http.addHeader("Content-Type", "text/plain;charset=UTF-8");
+  int httpResponseCode = http.GET();
+  
   if (httpResponseCode > 0)
   {
     String response = http.getString();
-    Serial.println(httpResponseCode);
-    Serial.println(response);
+    Serial.println("HTTP Response Code=" + httpResponseCode);
 
+    if (httpResponseCode != 200)
+    {
+      Serial.println("HTTP Response=" + response);
+      http.end();
+      return false;
+    }
+    
     DynamicJsonDocument doc(1024);
     DeserializationError error = deserializeJson(doc, response);
     if (error)
     {
       Serial.print("deserializeJson error ");
       Serial.println(error.c_str());
+      http.end();
       return false;
     }
-
-    const char* tempPtr; 
+    
+    const char *tempPtr;
     tempPtr = doc["minValue"];
     String tempStr;
     charToStringL(tempPtr, tempStr);
     minTemp = tempStr.toFloat();
-    tempPtr = doc["maxValue"];
-    charToStringL(tempPtr,tempStr);
-    maxTemp = tempStr.toFloat();
+    settingStr = "Minimum temperature="+tempStr;
 
-    const char* shouldSleepPtr;
+    tempPtr = doc["maxValue"];
+    charToStringL(tempPtr, tempStr);
+    maxTemp = tempStr.toFloat();
+    settingStr += ", Maximum temperature="+tempStr;
+
+    Serial.println("Response=" + response);
+
+    tempPtr = doc["wakeUpTime"];
+    charToStringL(tempPtr, tempStr);
+    settingStr += ", Wakeup time="+tempStr;
+
+    tempPtr = doc["sleepTime"];
+    charToStringL(tempPtr, tempStr);
+    settingStr += ", Sleep time="+tempStr;
+
+    const char *shouldSleepPtr;
     String shouldSleepStr;
     shouldSleepPtr = doc["shouldSleep"];
-    currentTime = doc["currentTime"];
 
     charToStringL(shouldSleepPtr, shouldSleepStr);
-    shouldSleepStr.equals("true")  ? shouldSleep = true : shouldSleep = false;
+    shouldSleepStr.equals("true") ? shouldSleep = true : shouldSleep = false;
 
+    currentTime = doc["currentTime"];
+    http.end();
     return true;
   }
   else
   {
-    Serial.print("Error on sending PUT Request: ");
+    Serial.print(" Error on sending GET Request: ");
     Serial.println(httpResponseCode);
+    http.end();
     return false;
   }
+}
 
-  http.end();
+void ConfigRestServerRouting()
+{
+  httpRestServer.on("/", HTTP_GET, []() {
+    httpRestServer.send(200, "text/html", SendHTML());
+  });
 }
 
 void setup()
@@ -199,34 +273,42 @@ void setup()
   Serial.println(" devices.");
   Serial.println("");
 
-  Serial.println("Printing addresses...");
-  for (int i = 0; i < deviceCount; i++)
+  if (deviceCount > 0)
   {
-    Serial.print("Sensor ");
-    Serial.print(i + 1);
-    Serial.print(" : ");
-    sensors.getAddress(Thermometer, i);
-    printAddress(Thermometer);
-  }
-
-  if (sensors.getAddress(Thermometer, 0))
-  {
-    //Take the first sensor as the measuring sensor
-    for (uint8_t i = 0; i < 8; i++)
+    Serial.println("Printing addresses...");
+    for (int i = 0; i < deviceCount; i++)
     {
-      sensor1[i] = Thermometer[i];
+      Serial.print("Sensor ");
+      Serial.print(i + 1);
+      Serial.print(" : ");
+      sensors.getAddress(Thermometer, i);
+      printAddress(Thermometer);
+    }
+
+    if (sensors.getAddress(Thermometer, 0))
+    {
+      //Take the first sensor as the measuring sensor
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        sensor1[i] = Thermometer[i];
+      }
     }
   }
 
   Serial.println("Connecting to ");
   Serial.println(ssid);
 
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED)
+  if (init_wifi() == WL_CONNECTED)
   {
-    delay(5000);
-    Serial.print(".");
+    Serial.print("Connected to ");
+    Serial.print(ssid);
+    Serial.print("--- IP: ");
+    Serial.println(WiFi.localIP());
+  }
+  else
+  {
+    Serial.print("Error connecting to: ");
+    Serial.println(ssid);
   }
 
   Serial.println("");
@@ -234,17 +316,23 @@ void setup()
   Serial.print("Got IP: ");
   Serial.println(WiFi.localIP());
 
-  server.on("/", handle_OnConnect);
-  server.onNotFound(handle_NotFound);
+  ConfigRestServerRouting();
 
-  server.begin();
-  Serial.println("HTTP server started");
+  httpRestServer.begin();
+  Serial.println("HTTP httpRestServer started");
 }
 
 void loop()
 {
-  sensors.requestTemperatures();
-  tempSensor1 = sensors.getTempC(sensor1); // Gets the values of the temperature
+  if (deviceCount > 0)
+  {
+    sensors.requestTemperatures();
+    tempSensor1 = sensors.getTempC(sensor1); // Gets the values of the temperature
+  }
+  else
+  {
+    tempSensor1 = 1000;
+  }
 
   statusStr = "";
   if (!GetProperties((String)tempSensor1))
@@ -297,9 +385,8 @@ void loop()
 
     statusStr = currentTimeStr + " - " + statusStr;
     Serial.println(statusStr);
-
-    server.send(200, "text/html", SendHTML());
   }
-  server.handleClient();
-  delay(1000);
+
+  httpRestServer.handleClient();
+  delay(PROCESSING_DELAY);
 }
