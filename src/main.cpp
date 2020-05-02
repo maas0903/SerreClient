@@ -10,18 +10,18 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <WiFiUdp.h>
-#include "ESP8266HTTPClient.h"
 
 #define HTTP_REST_PORT 80
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
 
-IPAddress staticIP(192, 168, 63, 122);
+IPAddress staticIP(192, 168, 63, 121);
 IPAddress gateway(192, 168, 63, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(192, 168, 63, 21);
 IPAddress dnsGoogle(8, 8, 8, 8);
 String hostName = "serre01";
+const char *propertyHost = "pastei01.local";
 
 ESP8266WebServer httpRestServer(HTTP_REST_PORT);
 
@@ -29,7 +29,7 @@ WiFiUDP ntpUDP;
 
 #define ONE_WIRE_BUS 2
 #define RELAY_BUS 0
-#define PROCESSING_DELAY 5000
+#define PROCESSING_DELAY 1000
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -56,7 +56,7 @@ int init_wifi()
 
   WiFi.config(staticIP, gateway, subnet, dns, dnsGoogle);
   WiFi.mode(WIFI_STA);
-  //WiFi.hostname(hostName);
+  WiFi.hostname(hostName);
   WiFi.begin(ssid, password);
 
   while ((WiFi.status() != WL_CONNECTED) && (retries < MAX_WIFI_INIT_RETRY))
@@ -180,75 +180,76 @@ void charToString(char S[], String &D)
 
 boolean GetProperties(String currentTemp)
 {
-  HTTPClient http;
-  
-  //http.begin("http://maiden.pagekite.me/MelektroApi/getsettings/?statusStr="+currentTemp);
-  http.begin("http://pastei01.local:8080/MelektroApi/getsettings/?statusStr=" + currentTemp);
-  //http.addHeader("Content-Type", "text/plain;charset=UTF-8");
-  int httpResponseCode = http.GET();
-  
-  if (httpResponseCode > 0)
+  String url = "/MelektroApi/getsettings/?statusStr=" + currentTemp;
+  WiFiClient client;
+  String response;
+  if (client.connect(propertyHost, 8080))
   {
-    String response = http.getString();
-    Serial.println("HTTP Response Code=" + httpResponseCode);
+    client.print(String("GET " + url) + " HTTP/1.1\r\n" +
+                 "Host: " + propertyHost + "\r\n" +
+                 "Connection: close\r\n" +
+                 "\r\n");
 
-    if (httpResponseCode != 200)
+    while (client.connected() || client.available())
     {
-      Serial.println("HTTP Response=" + response);
-      http.end();
-      return false;
+      if (client.available())
+      {
+        String line = client.readStringUntil('\n');
+        if (line.indexOf("minValue") > 0)
+        {
+          response = line;
+        }
+      }
     }
-    
-    DynamicJsonDocument doc(1024);
-    DeserializationError error = deserializeJson(doc, response);
-    if (error)
-    {
-      Serial.print("deserializeJson error ");
-      Serial.println(error.c_str());
-      http.end();
-      return false;
-    }
-    
-    const char *tempPtr;
-    tempPtr = doc["minValue"];
-    String tempStr;
-    charToStringL(tempPtr, tempStr);
-    minTemp = tempStr.toFloat();
-    settingStr = "Minimum temperature="+tempStr;
-
-    tempPtr = doc["maxValue"];
-    charToStringL(tempPtr, tempStr);
-    maxTemp = tempStr.toFloat();
-    settingStr += ", Maximum temperature="+tempStr;
-
-    Serial.println("Response=" + response);
-
-    tempPtr = doc["wakeUpTime"];
-    charToStringL(tempPtr, tempStr);
-    settingStr += ", Wakeup time="+tempStr;
-
-    tempPtr = doc["sleepTime"];
-    charToStringL(tempPtr, tempStr);
-    settingStr += ", Sleep time="+tempStr;
-
-    const char *shouldSleepPtr;
-    String shouldSleepStr;
-    shouldSleepPtr = doc["shouldSleep"];
-
-    charToStringL(shouldSleepPtr, shouldSleepStr);
-    shouldSleepStr.equals("true") ? shouldSleep = true : shouldSleep = false;
-
-    currentTime = doc["currentTime"];
-    http.end();
-    return true;
+    client.stop();
   }
   else
   {
-    Serial.print(" Error on sending GET Request: ");
-    Serial.println(httpResponseCode);
-    http.end();
+    Serial.println("connection failed!");
+    client.stop();
     return false;
   }
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, response);
+  if (error)
+  {
+    Serial.print("deserializeJson error ");
+    Serial.println(error.c_str());
+    return false;
+  }
+
+  const char *tempPtr;
+  tempPtr = doc["minValue"];
+  String tempStr;
+  charToStringL(tempPtr, tempStr);
+  minTemp = tempStr.toFloat();
+  settingStr = "Minimum temperature=" + tempStr;
+
+  tempPtr = doc["maxValue"];
+  charToStringL(tempPtr, tempStr);
+  maxTemp = tempStr.toFloat();
+  settingStr += ", Maximum temperature=" + tempStr;
+
+  Serial.println("Response=" + response);
+
+  tempPtr = doc["wakeUpTime"];
+  charToStringL(tempPtr, tempStr);
+  settingStr += ", Wakeup time=" + tempStr;
+
+  tempPtr = doc["sleepTime"];
+  charToStringL(tempPtr, tempStr);
+  settingStr += ", Sleep time=" + tempStr;
+
+  const char *shouldSleepPtr;
+  String shouldSleepStr;
+  shouldSleepPtr = doc["shouldSleep"];
+
+  charToStringL(shouldSleepPtr, shouldSleepStr);
+  shouldSleepStr.equals("true") ? shouldSleep = true : shouldSleep = false;
+
+  currentTime = doc["currentTime"];
+
+  return true;
 }
 
 void ConfigRestServerRouting()
