@@ -15,7 +15,9 @@
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
 
-IPAddress staticIP(192, 168, 63, 121);
+//#define DEBUG
+
+IPAddress staticIP(192, 168, 63, 126);
 IPAddress gateway(192, 168, 63, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(192, 168, 63, 21);
@@ -48,11 +50,53 @@ boolean shouldSleep;
 
 DeviceAddress Thermometer;
 
+void SerialPrintLine(String line)
+{
+    #ifdef DEBUG
+    Serial.println(line);
+    #endif
+}
+
+void SerialPrintLine(const Printable & line)
+{
+    #ifdef DEBUG
+    Serial.println(line);
+    #endif
+}
+
+void SerialPrint(String line)
+{
+    #ifdef DEBUG
+    Serial.print(line);
+    #endif
+}
+
+void SerialPrint(int i, int j)
+{
+    #ifdef DEBUG
+    Serial.print(i, j);
+    #endif
+}
+
+void SerialPrint(int i, unsigned char j)
+{
+    #ifdef DEBUG
+    Serial.print(i, j);
+    #endif
+}
+
+void SerialPrint(int i)
+{
+    #ifdef DEBUG
+    Serial.print(i);
+    #endif
+}
+
 int init_wifi()
 {
   int retries = 0;
 
-  Serial.println("Connecting to WiFi");
+  SerialPrintLine("Connecting to WiFi");
 
   WiFi.config(staticIP, gateway, subnet, dns, dnsGoogle);
   WiFi.mode(WIFI_STA);
@@ -63,9 +107,9 @@ int init_wifi()
   {
     retries++;
     delay(WIFI_RETRY_DELAY);
-    Serial.print("#");
+    SerialPrint("#");
   }
-  Serial.println();
+  SerialPrintLine("");
   return WiFi.status();
 }
 
@@ -73,14 +117,14 @@ void printAddress(DeviceAddress deviceAddress)
 {
   for (uint8_t i = 0; i < 8; i++)
   {
-    Serial.print("0x");
+    SerialPrint("0x");
     if (deviceAddress[i] < 0x10)
-      Serial.print("0");
+      SerialPrint("0");
     Serial.print(deviceAddress[i], HEX);
     if (i < 7)
-      Serial.print(", ");
+      SerialPrint(", ");
   }
-  Serial.println("");
+  SerialPrintLine("");
 }
 
 void handle_NotFound()
@@ -205,7 +249,7 @@ boolean GetProperties(String currentTemp)
   }
   else
   {
-    Serial.println("connection failed!");
+    SerialPrintLine("connection failed!");
     client.stop();
     return false;
   }
@@ -213,8 +257,8 @@ boolean GetProperties(String currentTemp)
   DeserializationError error = deserializeJson(doc, response);
   if (error)
   {
-    Serial.print("deserializeJson error ");
-    Serial.println(error.c_str());
+    SerialPrint("deserializeJson error ");
+    SerialPrintLine(error.c_str());
     return false;
   }
 
@@ -230,7 +274,7 @@ boolean GetProperties(String currentTemp)
   maxTemp = tempStr.toFloat();
   settingStr += ", Maximum temperature=" + tempStr;
 
-  Serial.println("Response=" + response);
+  SerialPrintLine("Response=" + response);
 
   tempPtr = doc["wakeUpTime"];
   charToStringL(tempPtr, tempStr);
@@ -261,7 +305,11 @@ void ConfigRestServerRouting()
 
 void setup()
 {
+#ifdef DEBUG
   Serial.begin(115200);
+  delay(5000);
+#endif
+
   pinMode(RELAY_BUS, OUTPUT);
   digitalWrite(RELAY_BUS, HIGH);
 
@@ -270,18 +318,20 @@ void setup()
   sensors.begin();
 
   deviceCount = sensors.getDeviceCount();
-  Serial.print(deviceCount, DEC);
-  Serial.println(" devices.");
-  Serial.println("");
+  //SerialPrint(deviceCount, DEC);
+  SerialPrintLine(deviceCount+" devices.");
+  SerialPrintLine("");
 
   if (deviceCount > 0)
   {
-    Serial.println("Printing addresses...");
+#ifdef DEBUG
+    SerialPrintLine("Printing addresses...");
+#endif
     for (int i = 0; i < deviceCount; i++)
     {
-      Serial.print("Sensor ");
-      Serial.print(i + 1);
-      Serial.print(" : ");
+      SerialPrint("Sensor ");
+      SerialPrint(i + 1);
+      SerialPrint(" : ");
       sensors.getAddress(Thermometer, i);
       printAddress(Thermometer);
     }
@@ -296,31 +346,31 @@ void setup()
     }
   }
 
-  Serial.println("Connecting to ");
-  Serial.println(ssid);
+  SerialPrintLine("Connecting to ");
+  SerialPrintLine(ssid);
 
   if (init_wifi() == WL_CONNECTED)
   {
-    Serial.print("Connected to ");
-    Serial.print(ssid);
-    Serial.print("--- IP: ");
-    Serial.println(WiFi.localIP());
+    SerialPrint("Connected to ");
+    SerialPrint(ssid);
+    SerialPrint("--- IP: ");
+    SerialPrintLine(WiFi.localIP());
   }
   else
   {
-    Serial.print("Error connecting to: ");
-    Serial.println(ssid);
+    SerialPrint("Error connecting to: ");
+    SerialPrintLine(ssid);
   }
 
-  Serial.println("");
-  Serial.println("WiFi connected..!");
-  Serial.print("Got IP: ");
-  Serial.println(WiFi.localIP());
+  SerialPrintLine("");
+  SerialPrintLine("WiFi connected..!");
+  SerialPrint("Got IP: ");
+  SerialPrintLine(WiFi.localIP());
 
   ConfigRestServerRouting();
 
   httpRestServer.begin();
-  Serial.println("HTTP httpRestServer started");
+  SerialPrintLine("HTTP httpRestServer started");
 }
 
 void loop()
@@ -385,7 +435,7 @@ void loop()
     }
 
     statusStr = currentTimeStr + " - " + statusStr;
-    Serial.println(statusStr);
+    SerialPrintLine(statusStr);
   }
 
   httpRestServer.handleClient();
