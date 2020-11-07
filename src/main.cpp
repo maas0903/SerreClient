@@ -15,7 +15,7 @@
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
 
-//#define DEBUG
+#define DEBUG
 
 IPAddress staticIP(192, 168, 63, 126);
 IPAddress gateway(192, 168, 63, 1);
@@ -23,7 +23,7 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress dns(192, 168, 63, 21);
 IPAddress dnsGoogle(8, 8, 8, 8);
 String hostName = "serre01";
-const char *propertyHost = "pastei01.local";
+const char *propertyHost = "pastei05.local";
 
 ESP8266WebServer httpRestServer(HTTP_REST_PORT);
 
@@ -31,7 +31,7 @@ WiFiUDP ntpUDP;
 
 #define ONE_WIRE_BUS 2
 #define RELAY_BUS 0
-#define PROCESSING_DELAY 1000
+#define PROCESSING_DELAY 60000
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -52,44 +52,44 @@ DeviceAddress Thermometer;
 
 void SerialPrintLine(String line)
 {
-    #ifdef DEBUG
-    Serial.println(line);
-    #endif
+#ifdef DEBUG
+  Serial.println(line);
+#endif
 }
 
-void SerialPrintLine(const Printable & line)
+void SerialPrintLine(const Printable &line)
 {
-    #ifdef DEBUG
-    Serial.println(line);
-    #endif
+#ifdef DEBUG
+  Serial.println(line);
+#endif
 }
 
 void SerialPrint(String line)
 {
-    #ifdef DEBUG
-    Serial.print(line);
-    #endif
+#ifdef DEBUG
+  Serial.print(line);
+#endif
 }
 
 void SerialPrint(int i, int j)
 {
-    #ifdef DEBUG
-    Serial.print(i, j);
-    #endif
+#ifdef DEBUG
+  Serial.print(i, j);
+#endif
 }
 
 void SerialPrint(int i, unsigned char j)
 {
-    #ifdef DEBUG
-    Serial.print(i, j);
-    #endif
+#ifdef DEBUG
+  Serial.print(i, j);
+#endif
 }
 
 void SerialPrint(int i)
 {
-    #ifdef DEBUG
-    Serial.print(i);
-    #endif
+#ifdef DEBUG
+  Serial.print(i);
+#endif
 }
 
 int init_wifi()
@@ -160,19 +160,19 @@ String SendHTML()
   ptr += ".icon{width:82px}";
   ptr += "</style>";
 
-  //AJAX to auto refresh the body
-  ptr += "<script>\n";
-  ptr += "setInterval(loadDoc,1000);\n";
-  ptr += "function loadDoc() {\n";
-  ptr += "var xhttp = new XMLHttpRequest();\n";
-  ptr += "xhttp.onreadystatechange = function() {\n";
-  ptr += "if (this.readyState == 4 && this.status == 200) {\n";
-  ptr += "document.body.innerHTML =this.responseText}\n";
-  ptr += "};\n";
-  ptr += "xhttp.open(\"GET\", \"/\", true);\n";
-  ptr += "xhttp.send();\n";
-  ptr += "}\n";
-  ptr += "</script>\n";
+  // //AJAX to auto refresh the body
+  // ptr += "<script>\n";
+  // ptr += "setInterval(loadDoc,10000);\n";
+  // ptr += "function loadDoc() {\n";
+  // ptr += "var xhttp = new XMLHttpRequest();\n";
+  // ptr += "xhttp.onreadystatechange = function() {\n";
+  // ptr += "if (this.readyState == 4 && this.status == 200) {\n";
+  // ptr += "document.body.innerHTML =this.responseText}\n";
+  // ptr += "};\n";
+  // ptr += "xhttp.open(\"GET\", \"/\", true);\n";
+  // ptr += "xhttp.send();\n";
+  // ptr += "}\n";
+  // ptr += "</script>\n";
 
   ptr += "</head>";
 
@@ -224,10 +224,10 @@ void charToString(char S[], String &D)
 
 boolean GetProperties(String currentTemp)
 {
-  String url = "/MelektroApi/getsettings/?statusStr=" + currentTemp;
+  String url = "/getsettings/?statusStr=" + currentTemp;
   WiFiClient client;
   String response;
-  if (client.connect(propertyHost, 8080))
+  if (client.connect(propertyHost, 8082))
   {
     client.print(String("GET " + url) + " HTTP/1.1\r\n" +
                  "Host: " + propertyHost + "\r\n" +
@@ -239,6 +239,7 @@ boolean GetProperties(String currentTemp)
       if (client.available())
       {
         String line = client.readStringUntil('\n');
+        SerialPrintLine("line=" + line);
         if (line.indexOf("minValue") > 0)
         {
           response = line;
@@ -254,6 +255,7 @@ boolean GetProperties(String currentTemp)
     return false;
   }
   DynamicJsonDocument doc(1024);
+  SerialPrintLine("response=" + response);
   DeserializationError error = deserializeJson(doc, response);
   if (error)
   {
@@ -315,11 +317,31 @@ void setup()
 
   delay(100);
 
-  sensors.begin();
+  SerialPrintLine("Connecting to ");
+  SerialPrintLine(ssid);
 
+  if (init_wifi() == WL_CONNECTED)
+  {
+    SerialPrint("Connected to ");
+    SerialPrint(ssid);
+    SerialPrint("--- IP: ");
+    SerialPrintLine(WiFi.localIP());
+  }
+  else
+  {
+    SerialPrint("Error connecting to: ");
+    SerialPrintLine(ssid);
+  }
+
+  SerialPrintLine("");
+  SerialPrintLine("WiFi connected..!");
+  SerialPrint("Got IP: ");
+  SerialPrintLine(WiFi.localIP());
+
+  sensors.begin();
   deviceCount = sensors.getDeviceCount();
   //SerialPrint(deviceCount, DEC);
-  SerialPrintLine(deviceCount+" devices.");
+  SerialPrintLine(deviceCount + " devices.");
   SerialPrintLine("");
 
   if (deviceCount > 0)
@@ -345,27 +367,6 @@ void setup()
       }
     }
   }
-
-  SerialPrintLine("Connecting to ");
-  SerialPrintLine(ssid);
-
-  if (init_wifi() == WL_CONNECTED)
-  {
-    SerialPrint("Connected to ");
-    SerialPrint(ssid);
-    SerialPrint("--- IP: ");
-    SerialPrintLine(WiFi.localIP());
-  }
-  else
-  {
-    SerialPrint("Error connecting to: ");
-    SerialPrintLine(ssid);
-  }
-
-  SerialPrintLine("");
-  SerialPrintLine("WiFi connected..!");
-  SerialPrint("Got IP: ");
-  SerialPrintLine(WiFi.localIP());
 
   ConfigRestServerRouting();
 
