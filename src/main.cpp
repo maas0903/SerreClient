@@ -50,6 +50,8 @@ boolean shouldSleep;
 
 DeviceAddress Thermometer;
 
+unsigned long time_now = 0;
+
 void SerialPrintLine(String line)
 {
 #ifdef DEBUG
@@ -160,19 +162,19 @@ String SendHTML()
   ptr += ".icon{width:82px}";
   ptr += "</style>";
 
-  // //AJAX to auto refresh the body
-  // ptr += "<script>\n";
-  // ptr += "setInterval(loadDoc,10000);\n";
-  // ptr += "function loadDoc() {\n";
-  // ptr += "var xhttp = new XMLHttpRequest();\n";
-  // ptr += "xhttp.onreadystatechange = function() {\n";
-  // ptr += "if (this.readyState == 4 && this.status == 200) {\n";
-  // ptr += "document.body.innerHTML =this.responseText}\n";
-  // ptr += "};\n";
-  // ptr += "xhttp.open(\"GET\", \"/\", true);\n";
-  // ptr += "xhttp.send();\n";
-  // ptr += "}\n";
-  // ptr += "</script>\n";
+  //AJAX to auto refresh the body
+  ptr += "<script>\n";
+  ptr += "setInterval(loadDoc,10000);\n";
+  ptr += "function loadDoc() {\n";
+  ptr += "var xhttp = new XMLHttpRequest();\n";
+  ptr += "xhttp.onreadystatechange = function() {\n";
+  ptr += "if (this.readyState == 4 && this.status == 200) {\n";
+  ptr += "document.body.innerHTML =this.responseText}\n";
+  ptr += "};\n";
+  ptr += "xhttp.open(\"GET\", \"/\", true);\n";
+  ptr += "xhttp.send();\n";
+  ptr += "}\n";
+  ptr += "</script>\n";
 
   ptr += "</head>";
 
@@ -376,69 +378,77 @@ void setup()
 
 void loop()
 {
-  if (deviceCount > 0)
+  if (millis() > time_now + PROCESSING_DELAY || time_now == 0)
   {
-    sensors.requestTemperatures();
-    tempSensor1 = sensors.getTempC(sensor1); // Gets the values of the temperature
-  }
-  else
-  {
-    tempSensor1 = 1000;
-  }
-
-  statusStr = "";
-  if (!GetProperties((String)tempSensor1))
-  {
-    statusStr = "Could not load Properties";
-    //swith warming off
-    digitalWrite(RELAY_BUS, HIGH);
-  }
-  else
-  {
-    String currentTimeStr;
-    charToStringL(currentTime, currentTimeStr);
-    if (shouldSleep)
+    SerialPrintLine("**********************In processing************************");
+    if (deviceCount > 0)
     {
-      statusStr = currentTimeStr + " - Sleeping";
+      sensors.requestTemperatures();
+      tempSensor1 = sensors.getTempC(sensor1); // Gets the values of the temperature
+    }
+    else
+    {
+      tempSensor1 = 1000;
+    }
+
+    statusStr = "";
+    if (!GetProperties((String)tempSensor1))
+    {
+      statusStr = "Could not load Properties";
+      //swith warming off
       digitalWrite(RELAY_BUS, HIGH);
     }
     else
     {
-      //handle temperature histeresis
-      if (goingUp)
+      String currentTimeStr;
+      charToStringL(currentTime, currentTimeStr);
+      if (shouldSleep)
       {
-        if (tempSensor1 >= maxTemp)
-        {
-          goingUp = false;
-          statusStr = "Phase change from going up to going down";
-        }
-        else
-        {
-          //swith warming on
-          digitalWrite(RELAY_BUS, LOW);
-          statusStr = "going up - " + String(tempSensor1) + " < (Upper) " + String(maxTemp) + " Pad is ON";
-        }
+        statusStr = currentTimeStr + " - Sleeping";
+        digitalWrite(RELAY_BUS, HIGH);
       }
       else
       {
-        if (tempSensor1 <= minTemp)
+        //handle temperature histeresis
+        if (goingUp)
         {
-          statusStr = "Phase change from going down to going up";
-          goingUp = true;
+          if (tempSensor1 >= maxTemp)
+          {
+            goingUp = false;
+            statusStr = "Phase change from going up to going down";
+          }
+          else
+          {
+            //swith warming on
+            digitalWrite(RELAY_BUS, LOW);
+            statusStr = "going up - " + String(tempSensor1) + " < (Upper) " + String(maxTemp) + " Pad is ON";
+          }
         }
         else
         {
-          //swith warming off
-          digitalWrite(RELAY_BUS, HIGH);
-          statusStr = "going down - " + String(tempSensor1) + " > (Lower)" + String(minTemp) + " Pad is OFF";
+          if (tempSensor1 <= minTemp)
+          {
+            statusStr = "Phase change from going down to going up";
+            goingUp = true;
+          }
+          else
+          {
+            //swith warming off
+            digitalWrite(RELAY_BUS, HIGH);
+            statusStr = "going down - " + String(tempSensor1) + " > (Lower)" + String(minTemp) + " Pad is OFF";
+          }
         }
       }
-    }
 
-    statusStr = currentTimeStr + " - " + statusStr;
-    SerialPrintLine(statusStr);
+      statusStr = currentTimeStr + " - " + statusStr;
+      SerialPrintLine(statusStr);
+
+      time_now = millis();
+    }
+    SerialPrintLine("**********************Done processing************************");
   }
 
+  delay(500);
+
   httpRestServer.handleClient();
-  delay(PROCESSING_DELAY);
 }
